@@ -1,29 +1,75 @@
-from feature_process import *
-from sklearn.model_selection import train_test_split
-from sklearn.externals import joblib
-from sklearn.decomposition import PCA
+from preprocess.feature_process import *
 from sklearn.svm import SVC
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.linear_model import SGDClassifier
+from sklearn.metrics import roc_curve
 
-def train(train_all=True):
-    # TODO 1:读入dataset
-    if train_all:
-        dataset_x, dataset_y = get_dataset('./data/train.csv',read_all=True)
-    else:
-        dataset_x, dataset_y = get_dataset('./data/train.csv', read_all=False)
 
-    # TODO 2:PCA降维
-    pca = PCA(n_components='mle', svd_solver='full')
-    dataset_x_pca = pca.fit_transform(dataset_x)
-    joblib.dump(pca, './model/pca.m')
+def mayi_score(y_true, y_score):
+    """ Evaluation metric
+    """
+    fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=1)
+    score = 0.4 * tpr[np.where(fpr >= 0.001)[0][0]] + \
+            0.3 * tpr[np.where(fpr >= 0.005)[0][0]] + \
+            0.3 * tpr[np.where(fpr >= 0.01)[0][0]]
 
-    # TODO 3:分割数据集为训练集和测试集
-    train_x, test_x, train_y, test_y = train_test_split(dataset_x_pca, dataset_y, test_size=0.3, random_state=0)
+    return score
 
-    # TODO 4:SVM Classifier
-    svc = SVC(C=1.0, kernel='rbf', class_weight='balanced', probability=True)
-    svc.fit(train_x, train_y)
-    print(svc.score(test_x, test_y))
+# 193 225 239 169 197 204
+def train():
+    # TODO 1: Model
+    svc = SVC(
+        #class_weight={0: 0.5035246727089627, 1: 75.42857142857143},
+        probability=True,
+        C=1
+    )
+    sgd = SGDClassifier(
+        loss='log',
+        penalty='l2',
+        class_weight={0: 0.5035246727089627, 1: 71.42857142857143},
+    )
+    gdbt = GradientBoostingClassifier(n_estimators=200)
 
-    # TODO 5:save model
-    joblib.dump(svc, './model/train_model.m')
+    # TODO 2:Test_Dataset
+    reader = pd.read_csv('./data/train_without_sample_labeled.csv', iterator=True)
+    data = reader.get_chunk(size=200000)
+    test_y = data['label'].values.astype(int)
+    data.drop(['label'], axis=1, inplace=True)
+    test_x = data.values
 
+    # TODO 3:Hyper parameters
+    batch_size = 1000000
+    batch = 0
+    max_score = 0
+    model = svc
+
+    # TODO 4:train
+    while 1:
+        try:
+            print('batch = ', batch)
+            batch += 1
+            # get x,y
+            data = reader.get_chunk(size=batch_size)
+            y = data['label'].values.astype(int)
+            data.drop(['label'], axis=1, inplace=True)
+            x = data.values
+
+            # train model
+            model.fit(x, y)
+
+            # test model
+            test_y_prob = model.predict_proba(X=test_x)[:, 1]
+            score = mayi_score(test_y, test_y_prob)
+            print('score = ', score)
+
+            # save model
+            if score > max_score:
+                max_score = score
+                joblib.dump(model, './model/svc_without_classweight_1000000.m')
+
+        except StopIteration:
+            print("Iteration is stopped")
+            break
+
+if __name__ == '__main__':
+    train()
